@@ -11,6 +11,21 @@ versions adhere to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-09-08
+
+The issue #112 release: a full delta sweep against Capsule's current
+API closed every gap it found. Embed allow-lists are now per-resource
+and cover nested-ref enrichment (the v2.0.0 lists were over-
+restrictive); the write surface gains tracks-at-create, opportunity
+duration, task recurrence, note activity types, and entry-attachment
+removal; three new read tools land (`list_activities`,
+`list_countries`, `list_currencies`); `since` works on all search
+tools; 202 Accepted deletes are surfaced as `scheduled: true`. Every
+wire shape was probed live before implementation and re-verified
+through the shipped code (`scripts/wire-trace-v230.ts`). 92 tools
+(53 read-only), 613 tests. Soaked in production for 23 days with
+zero failure events before this cut.
+
 ### Added
 
 - **`list_activities`** — global cross-entity activity feed
