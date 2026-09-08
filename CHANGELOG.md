@@ -90,6 +90,29 @@ versions adhere to [Semantic Versioning](https://semver.org).
   so it covers every call path. `run_saved_filter` validates embeds
   cross-field against its `entity` parameter.
 
+### Security
+
+- Cleared all 5 open Dependabot alerts, taking `npm audit` back to
+  zero at all levels. Both packages are transitive, so the patched
+  versions are pinned via `overrides`:
+  - **fast-uri ^3.1.6** (4 high advisories) — host confusion and SSRF
+    via percent-encoded scheme normalization, malformed-IPv6 and
+    repeated-percent-decoding hostname handling, and skipped IDN
+    canonicalization; via `@modelcontextprotocol/sdk` → `ajv`. The
+    v2.2.0 `^3.1.5` floor fell into the newly published vulnerable
+    range.
+  - **qs ^6.16.0** (medium) — array-limit bypass via bracket-key comma
+    parsing; via `express`. Runtime-relevant: `qs` parses query
+    strings on the HTTP transport.
+
+### Changed
+
+- Dependencies to latest: `express-rate-limit` 8.6.2 → 8.7.0,
+  `undici` 8.10.0 → 8.10.2, `zod` 4.4.3 → 4.5.4 (runtime);
+  `@types/node` 26.2.0 → 26.5.0, `@biomejs/biome` 2.5.8 → 2.5.12,
+  `vitest` 4.1.10 → 5.0.0 (dev, major — all 613 tests pass unchanged).
+  No runtime behaviour change.
+
 ## [2.2.0] — 2026-08-16
 
 Dependency and security maintenance. Every dependency is now at its
