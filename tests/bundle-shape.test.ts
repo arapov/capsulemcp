@@ -54,7 +54,7 @@ describe.skipIf(!distExists)("bundle shape (post-build canary)", () => {
     const httpKb = statSync(HTTP_PATH).size / 1024;
     // Floor catches "the bundler produced an empty file"; ceiling
     // catches "we accidentally inlined a giant dependency". The
-    // current values (~183 / ~210 KB) sit comfortably in the band.
+    // current values (~184 / ~211 KB) sit comfortably in the band.
     expect(stdioKb).toBeGreaterThan(MIN_KB);
     expect(stdioKb).toBeLessThan(MAX_KB);
     expect(httpKb).toBeGreaterThan(MIN_KB);

@@ -1,6 +1,6 @@
 {
   "name": "capsulemcp",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Model Context Protocol server for Capsule CRM. Lets Claude (Desktop, Code, or web Projects via Custom Connector) read and write your CRM in plain English. Covers contacts, opportunities, projects, tasks, timeline activity, structured filters, saved filters with sort, workflow tracks, file attachments, audit, and batch fetches.",
   "keywords": [
     "mcp",

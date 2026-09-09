@@ -74,11 +74,18 @@ function mergedTimelineNextPage(
   upstreamHasNextPage: boolean,
 ): number | undefined {
   const requestedWindowEnd = page * perPage;
+  // Hard ceiling, checked FIRST: each party contributes at most its
+  // top-100 entries, so the merge reliably orders only the global
+  // top ~100. With two populated feeds the candidate array can hold
+  // up to 200 rows whose order past position 100 is NOT guaranteed —
+  // the mergedLength check below must never promise a page out there.
   if (requestedWindowEnd >= PER_PARTY_FETCH_CAP) return undefined;
   if (mergedLength > requestedWindowEnd) return page + 1;
 
-  // Inside the guaranteed top-100 window, a full upstream page can
-  // still have more entries even when the current candidates are exhausted.
+  // Inside the guaranteed top-100 window, an upstream Link rel=next
+  // means there are older entries beyond our candidate set even though
+  // the merged slice was exactly full — preserve that signal instead
+  // of falsely ending the feed (the v1.6.6 regression this guards).
   if (upstreamHasNextPage) return page + 1;
 
   return undefined;
@@ -154,7 +161,9 @@ export async function listPartyEntries(input: z.infer<typeof listPartyEntriesSch
     return b.id - a.id;
   });
 
-  // Apply caller's pagination window over the merged feed.
+  // Apply caller's pagination window over the merged feed, truncated
+  // at the ceiling: positions past PER_PARTY_FETCH_CAP may be missing
+  // newer entries from a busier party, so they are never served.
   const start = (page - 1) * perPage;
   const slice = merged.slice(start, Math.min(start + perPage, PER_PARTY_FETCH_CAP));
   const nextPage = mergedTimelineNextPage(

@@ -11,6 +11,42 @@ versions adhere to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-09-09
+
+Post-release hardening: an independent external audit of v2.3.0
+confirmed three P2 defects — none in the new v2.3.0 surface itself —
+in merged-timeline pagination, token-endpoint throttling, and MCP
+task expiry. All three are fixed here (each pinned by tests that fail
+on v2.3.0), plus a transitive hono security floor. No tool-surface or
+wire-shape change. 92 tools (53 read-only), 623 tests.
+
+### Fixed
+
+- **Merged-timeline ceiling enforced** (`list_party_entries` with
+  `includeLinkedPersons`): each party contributes at most its top-100
+  entries, so the merged feed reliably orders only the global top
+  ~100 — but the pagination math promised windows past that point,
+  serving older entries as though they were next-chronological (a
+  busier party's unfetched entries were silently skipped) with a
+  continuation cursor that compounded the omission. Windows are now
+  truncated at the documented 100-entry ceiling and the feed ends
+  honestly there; windows starting beyond it return no entries.
+- **Token endpoint throttling covers failed authentication.** The
+  constant-time `client_secret` pre-check on `/token` rejected bad
+  credentials before the SDK's rate limiter ever counted the attempt,
+  so secret guessing was unthrottled. A limiter now charges every
+  token POST before any credential path (same per-IP budget, headers,
+  and OAuth error shape as the SDK's); the SDK's downstream limiter
+  is disabled so successful exchanges aren't counted twice.
+- **Task expiry stops queued batch writes.** When an MCP task
+  (SEP-1686) outlived its TTL, eviction removed ownership without
+  aborting the in-flight batch: queued writes kept dispatching to
+  Capsule under a task that no longer existed, un-inspectable and
+  un-cancellable, while its quota slot was freed. Expiry now aborts
+  the batch signal before eviction (already-dispatched requests
+  finish; nothing new is claimed), and running work stays charged
+  against per-client and global task quotas until the runner exits.
+
 ### Security
 
 - **hono** override floor `^4.13.1` → `^4.13.5`, lockfile resolved to

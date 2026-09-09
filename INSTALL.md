@@ -34,7 +34,7 @@ Paste this into the file (merge with existing `mcpServers` if you have other con
 
 Restart Claude Desktop. The Capsule tools appear in the tool picker.
 
-> **Version pinning.** Replace `"capsulemcp"` with `"capsulemcp@2.3.0"` (or any other published version) to pin. By default `npx` resolves to the `latest` tag on npm; for production setups pinning is the safer choice.
+> **Version pinning.** Replace `"capsulemcp"` with `"capsulemcp@2.3.1"` (or any other published version) to pin. By default `npx` resolves to the `latest` tag on npm; for production setups pinning is the safer choice.
 >
 > **First launch.** `npx` downloads the pre-built package from npm (a couple of seconds, much faster than the old GitHub-ref flow that had to clone + install + build). Subsequent launches are instant from the npx cache.
 
@@ -43,7 +43,7 @@ Restart Claude Desktop. The Capsule tools appear in the tool picker.
 If you're tracking a fork, an unreleased branch, or a specific commit you control, swap the npm name for a GitHub ref:
 
 ```json
-"args": ["-y", "github:soil-dev/capsulemcp#v2.3.0"]
+"args": ["-y", "github:soil-dev/capsulemcp#v2.3.1"]
 ```
 
 Same flags, same env, just installs from a git clone instead of the npm tarball. Useful for development; for production, prefer the npm form above.
@@ -63,7 +63,7 @@ export CAPSULE_API_TOKEN=<your token>
 claude mcp add capsule -- npx -y capsulemcp
 ```
 
-To pin a version, replace `capsulemcp` with `capsulemcp@2.3.0`. To install from a GitHub ref instead of npm (development / fork tracking), replace it with `github:soil-dev/capsulemcp#v2.3.0`.
+To pin a version, replace `capsulemcp` with `capsulemcp@2.3.1`. To install from a GitHub ref instead of npm (development / fork tracking), replace it with `github:soil-dev/capsulemcp#v2.3.1`.
 
 ## Path 3 — Manual install (for development)
 

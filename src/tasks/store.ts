@@ -97,9 +97,13 @@ const owners = new Map<string, string>();
  */
 const abortControllers = new Map<string, AbortController>();
 
-// Keep active work charged to its owner even after retention expires or
-// cancellation removes the task's controller. In-flight requests may still
-// be running; only the runner's finally block releases this reservation.
+/**
+ * Keep active work charged to its owner even after retention expires
+ * or cancellation removes the task's controller. In-flight requests
+ * may still be running; only the runner's finally block (via
+ * `finishTaskExecution`) releases this reservation, so quota
+ * accounting covers running work whose task entry is already gone.
+ */
 const runningOwners = new Map<string, string>();
 
 /**
@@ -109,6 +113,12 @@ const runningOwners = new Map<string, string>();
  * controller's `signal` fires. Called from the task runner right
  * after `createTask` so there's no window where a tasks/cancel
  * arrives before the abort handler is wired.
+ *
+ * Registration also takes out the `runningOwners` quota reservation,
+ * released only by `finishTaskExecution`. If the task was already
+ * evicted by the time the runner registers (TTL shorter than the
+ * scheduling gap — effectively test-only given the 1s TTL floor),
+ * the controller is aborted immediately so no work starts.
  */
 export function registerAbortController(taskId: string, controller: AbortController): void {
   const owner = owners.get(taskId);
@@ -120,6 +130,11 @@ export function registerAbortController(taskId: string, controller: AbortControl
   abortControllers.set(taskId, controller);
 }
 
+/**
+ * Runner-facing hook, called from the runner's finally block: the
+ * task's execution is over (stored, cancelled, or abandoned after
+ * expiry), so release the quota reservation and the controller.
+ */
 export function finishTaskExecution(taskId: string): void {
   runningOwners.delete(taskId);
   abortControllers.delete(taskId);
