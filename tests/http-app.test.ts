@@ -721,3 +721,82 @@ async function mintToken(): Promise<string> {
   const json = (await res.json()) as { access_token: string };
   return json.access_token;
 }
+
+describe("/token authentication rate limiting", () => {
+  it.each([
+    ["wrong secret", { client_id: CLIENT_ID, client_secret: "wrong" }, "/token"],
+    ["unknown client", { client_id: "unknown", client_secret: "wrong" }, "/token"],
+    ["missing credentials", {}, "/token"],
+    ["unknown subpath", { client_id: CLIENT_ID, client_secret: "wrong" }, "/token/unknown"],
+  ])("counts %s attempts before authentication", async (_label, credentials, path) => {
+    const provider = new OAuthProvider({
+      clientsStore: new FixedClientStore({
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        redirectUris: [REDIRECT_URI],
+      }),
+      signingKey: SIGNING_KEY,
+      resourceUrl: "http://localhost/mcp",
+      enableAuthCodeGc: false,
+    });
+    const app = createApp({
+      oauthProvider: provider,
+      issuerUrl: new URL("http://localhost"),
+      jsonLimit: "1mb",
+      allowedOrigins: [],
+      trustProxy: false,
+    });
+    const localServer = app.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      localServer.once("listening", resolve);
+      localServer.once("error", reject);
+    });
+    const localUrl = `http://127.0.0.1:${(localServer.address() as AddressInfo).port}`;
+    const postToken = (body: Record<string, string>, target = "/token") =>
+      fetch(`${localUrl}${target}`, {
+        method: "POST",
+        body: new URLSearchParams(body),
+      });
+    try {
+      for (let i = 0; i < 49; i++) {
+        const response = await postToken(credentials as Record<string, string>, path);
+        expect(response.status).toBe(path === "/token" ? 401 : 400);
+        expect(await response.json()).toMatchObject({ error: "invalid_client" });
+      }
+      const authorize = await fetch(
+        `${localUrl}/authorize?${new URLSearchParams({
+          response_type: "code",
+          client_id: CLIENT_ID,
+          redirect_uri: REDIRECT_URI,
+          code_challenge: CODE_CHALLENGE,
+          code_challenge_method: "S256",
+        })}`,
+        { redirect: "manual" },
+      );
+      const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+      await authorize.text();
+      // The last request in the budget can still complete a real exchange.
+      const valid = await postToken({
+        grant_type: "authorization_code",
+        code,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        code_verifier: CODE_VERIFIER,
+        redirect_uri: REDIRECT_URI,
+      });
+      expect(valid.status).toBe(200);
+      expect(valid.headers.get("ratelimit-remaining")).toBe("0");
+      expect(((await valid.json()) as { access_token: string }).access_token).toBeTruthy();
+      const blocked = await postToken(credentials as Record<string, string>, path);
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("retry-after")).toBeTruthy();
+      expect(blocked.headers.get("access-control-allow-origin")).toBe("*");
+      expect(await blocked.json()).toMatchObject({ error: "too_many_requests" });
+    } finally {
+      provider.shutdown();
+      await new Promise<void>((resolve, reject) =>
+        localServer.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
+});

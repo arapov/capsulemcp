@@ -100,6 +100,30 @@ export function createApp(opts: AppOptions): express.Express {
   // inside the SDK's auth router sees the configured trust setting.
   app.set("trust proxy", trustProxy);
 
+  // Charge every token attempt before credential checks can return early.
+  // Replace the SDK's downstream limiter (disabled below), retaining its
+  // default per-IP budget and OAuth error shape.
+  app.use(
+    "/token",
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      limit: 50,
+      standardHeaders: true,
+      legacyHeaders: false,
+      // Cover the whole mounted router: even unknown subpaths reach the
+      // SDK's client-auth middleware. Preflight/non-POST requests do not.
+      skip: (req) => req.method !== "POST",
+      handler: (_req, res) => {
+        // Match the SDK token router's public CORS policy on throttled
+        // responses too, so browser clients can read the OAuth error.
+        res.set("Access-Control-Allow-Origin", "*").status(429).json({
+          error: "too_many_requests",
+          error_description: "You have exceeded the rate limit for token requests",
+        });
+      },
+    }),
+  );
+
   // Constant-time client_secret pre-check on /token. Mounted BEFORE
   // mcpAuthRouter so we authenticate the client first; the SDK's own
   // client-auth (which uses native `!==` and is therefore not
@@ -182,6 +206,7 @@ export function createApp(opts: AppOptions): express.Express {
       scopesSupported: [],
       resourceName,
       resourceServerUrl: mcpResourceUrl,
+      tokenOptions: { rateLimit: false },
     }),
   );
 
