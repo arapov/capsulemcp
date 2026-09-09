@@ -74,23 +74,12 @@ function mergedTimelineNextPage(
   upstreamHasNextPage: boolean,
 ): number | undefined {
   const requestedWindowEnd = page * perPage;
+  if (requestedWindowEnd >= PER_PARTY_FETCH_CAP) return undefined;
   if (mergedLength > requestedWindowEnd) return page + 1;
 
-  // When the NEXT window still falls strictly within the per-party
-  // fetch cap (100), an upstream Link rel=next means there are older
-  // entries beyond our candidate set even though the merged slice was
-  // exactly full — preserve that signal instead of falsely ending the
-  // feed (the v1.6.6 regression this guards).
-  //
-  // Strict `<` (not `<=`): the merge of "top-100 per party" reliably
-  // orders only the global top ~100 entries. At `requestedWindowEnd
-  // == 100` we are AT that ceiling — page+1 would need candidates
-  // beyond 100 that we never fetched, so promising it would yield a
-  // phantom empty page. End honestly at the ceiling instead; the
-  // schema description directs deeper per-contact history to
-  // list_party_entries on the specific person.
-  const nextWindowWithinCap = requestedWindowEnd < PER_PARTY_FETCH_CAP;
-  if (nextWindowWithinCap && upstreamHasNextPage) return page + 1;
+  // Inside the guaranteed top-100 window, a full upstream page can
+  // still have more entries even when the current candidates are exhausted.
+  if (upstreamHasNextPage) return page + 1;
 
   return undefined;
 }
@@ -167,7 +156,7 @@ export async function listPartyEntries(input: z.infer<typeof listPartyEntriesSch
 
   // Apply caller's pagination window over the merged feed.
   const start = (page - 1) * perPage;
-  const slice = merged.slice(start, start + perPage);
+  const slice = merged.slice(start, Math.min(start + perPage, PER_PARTY_FETCH_CAP));
   const nextPage = mergedTimelineNextPage(
     page,
     perPage,
