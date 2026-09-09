@@ -520,3 +520,40 @@ describe("deleteEntry", () => {
     expect(result).toEqual({ deleted: true, alreadyDeleted: false, id: 99 });
   });
 });
+
+describe("merged timeline ceiling with multiple populated feeds", () => {
+  it.each([
+    { page: 3, perPage: 25, length: 25, nextPage: 4, firstId: 1950 },
+    { page: 4, perPage: 25, length: 25, nextPage: undefined, firstId: 1925 },
+    { page: 2, perPage: 75, length: 25, nextPage: undefined, firstId: 1925 },
+    { page: 5, perPage: 25, length: 0, nextPage: undefined, firstId: undefined },
+  ])("bounds page $page / perPage $perPage", async (example) => {
+    mockFetch(200, { parties: [{ id: 8 }] });
+    const count = Math.min(example.page * example.perPage, 100);
+    const rows = (base: number, month: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: base - i,
+        entryAt: new Date(Date.UTC(2026, month, 1) - i * 1000).toISOString(),
+      }));
+    // Org has still more recent entries upstream; the person's entries
+    // must not substitute for them beyond the guaranteed merged window.
+    mockFetch(
+      200,
+      { entries: rows(2000, 8) },
+      {
+        Link: '<https://api.capsulecrm.com/api/v2/parties/7/entries?page=2>; rel="next"',
+      },
+    );
+    mockFetch(200, { entries: rows(1000, 7) });
+    const { listPartyEntries } = await import("../src/tools/entries.js");
+    const result = await listPartyEntries({
+      partyId: 7,
+      page: example.page,
+      perPage: example.perPage,
+      includeLinkedPersons: true,
+    });
+    expect(result.entries).toHaveLength(example.length);
+    expect(result.nextPage).toBe(example.nextPage);
+    expect((result.entries[0] as { id: number } | undefined)?.id).toBe(example.firstId);
+  });
+});
