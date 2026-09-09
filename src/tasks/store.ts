@@ -97,6 +97,11 @@ const owners = new Map<string, string>();
  */
 const abortControllers = new Map<string, AbortController>();
 
+// Keep active work charged to its owner even after retention expires or
+// cancellation removes the task's controller. In-flight requests may still
+// be running; only the runner's finally block releases this reservation.
+const runningOwners = new Map<string, string>();
+
 /**
  * Runner-facing hook. Registers an AbortController for a task; when
  * the task's status flips to `cancelled` via the SDK's tasks/cancel
@@ -106,7 +111,18 @@ const abortControllers = new Map<string, AbortController>();
  * arrives before the abort handler is wired.
  */
 export function registerAbortController(taskId: string, controller: AbortController): void {
+  const owner = owners.get(taskId);
+  if (owner === undefined) {
+    controller.abort();
+    return;
+  }
+  runningOwners.set(taskId, owner);
   abortControllers.set(taskId, controller);
+}
+
+export function finishTaskExecution(taskId: string): void {
+  runningOwners.delete(taskId);
+  abortControllers.delete(taskId);
 }
 
 /**
@@ -137,6 +153,9 @@ function scheduleEviction(taskId: string, clientId: string, ttlMs: number): void
   if (existing) clearTimeout(existing);
   taskTtls.set(taskId, ttlMs);
   const timer = setTimeout(() => {
+    // Stop claiming queued writes before making the task untrackable.
+    // Already-dispatched requests finish under the runningOwners quota.
+    abortControllers.get(taskId)?.abort();
     owners.delete(taskId);
     abortControllers.delete(taskId);
     evictionTimers.delete(taskId);
@@ -157,12 +176,24 @@ export function _resetTaskStoreForTests(): void {
   taskTtls.clear();
   for (const ctrl of abortControllers.values()) ctrl.abort();
   abortControllers.clear();
+  runningOwners.clear();
 }
 
 function countPerClient(clientId: string): number {
   let n = 0;
   for (const owner of owners.values()) {
     if (owner === clientId) n++;
+  }
+  for (const [taskId, owner] of runningOwners) {
+    if (owner === clientId && !owners.has(taskId)) n++;
+  }
+  return n;
+}
+
+function countTotal(): number {
+  let n = owners.size;
+  for (const taskId of runningOwners.keys()) {
+    if (!owners.has(taskId)) n++;
   }
   return n;
 }
@@ -205,7 +236,7 @@ export function createScopedTaskStore(clientId: string): TaskStore {
       const cfg = getTasksConfig();
 
       // Quota enforcement first — cheapest reject path.
-      const totalNow = owners.size;
+      const totalNow = countTotal();
       if (totalNow >= cfg.maxTotal) {
         logEvent("task.rejected", {
           reason: "max_total",
