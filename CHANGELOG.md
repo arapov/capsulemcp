@@ -11,6 +11,18 @@ versions adhere to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Security
+
+- **hono** override floor `^4.13.1` → `^4.13.5`, lockfile resolved to
+  4.13.7 — clears 3 moderate advisories (unbounded dot-notation
+  nesting in `parseBody()`, query parsing after URL fragments causing
+  cache/proxy differentials, `toSSG()` output-directory traversal:
+  GHSA-g6gw-c38x-mqfc, GHSA-crvj-82cr-hjcx, GHSA-gqvv-2mrq-wpjv).
+  Transitive via `@modelcontextprotocol/sdk`'s hono adapter; the
+  affected Hono body/query parsers and static generator are unused —
+  this server parses bodies with Express. `npm audit` back to 0 at
+  all levels.
+
 ## [2.3.0] — 2026-09-08
 
 The issue #112 release: a full delta sweep against Capsule's current
