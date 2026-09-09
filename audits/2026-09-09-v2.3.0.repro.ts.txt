@@ -1,0 +1,124 @@
+// Audit reproductions: assert the intended behavior; fail on v2.3.0.
+import { afterEach, expect, it, vi } from "vitest";
+import type { AddressInfo } from "node:net";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { z } from "zod";
+import { fetch as capsuleFetch } from "undici";
+import { mockFetch } from "./test-helpers.js";
+import { listPartyEntries } from "../src/tools/entries.js";
+import { createApp } from "../src/http/app.js";
+import { OAuthProvider, FixedClientStore } from "../src/auth/provider.js";
+import { createCapsuleMcpServer } from "../src/server.js";
+import { _resetTaskStoreForTests } from "../src/tasks/store.js";
+
+vi.mock("undici", () => ({ fetch: vi.fn() }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.clearAllMocks();
+  _resetTaskStoreForTests();
+});
+
+it("ends the merged feed at position 100 when TWO parties have history", async () => {
+  vi.stubEnv("CAPSULE_API_TOKEN", "audit-test-token");
+  mockFetch(200, { parties: [{ id: 8 }] });
+  const rows = (base: number, month: number) => Array.from({ length: 100 }, (_, i) => ({
+    id: base - i,
+    entryAt: new Date(Date.UTC(2026, month, 1) - i * 1000).toISOString(),
+  }));
+  // Org has 101+ newer entries; person's entries are all older.
+  mockFetch(200, { entries: rows(2000, 8) }, {
+    Link: '<https://api.capsulecrm.com/api/v2/parties/7/entries?page=2>; rel="next"',
+  });
+  mockFetch(200, { entries: rows(1000, 7) });
+  const result = await listPartyEntries({
+    partyId: 7, page: 2, perPage: 75, includeLinkedPersons: true,
+  });
+  expect({ length: result.entries.length, nextPage: result.nextPage }).toEqual({
+    length: 25, nextPage: undefined,
+  });
+});
+
+it("throttles wrong-secret attempts at the token endpoint", async () => {
+  const provider = new OAuthProvider({
+    clientsStore: new FixedClientStore({
+      clientId: "audit-client",
+      clientSecret: "audit-secret-at-least-32-characters",
+      redirectUris: ["http://localhost/cb"],
+    }),
+    signingKey: "audit-signing-key-at-least-32-characters",
+    resourceUrl: "http://localhost/mcp",
+    enableAuthCodeGc: false,
+  });
+  const app = createApp({
+    oauthProvider: provider, issuerUrl: new URL("http://localhost"),
+    allowedOrigins: [], jsonLimit: "1mb", trustProxy: false,
+  });
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/token`;
+  const statuses: number[] = [];
+  try {
+    for (let i = 0; i < 55; i++) {
+      const res = await globalThis.fetch(url, {
+        method: "POST",
+        body: new URLSearchParams({
+          client_id: "audit-client", client_secret: "wrong",
+          grant_type: "authorization_code", code: "invalid", code_verifier: "invalid",
+        }),
+      });
+      statuses.push(res.status);
+      await res.text();
+    }
+    expect(statuses.slice(50)).toEqual([429, 429, 429, 429, 429]);
+  } finally {
+    provider.shutdown();
+    await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+  }
+});
+
+it("stops claiming batch writes after the task expires and disappears", async () => {
+  vi.stubEnv("MCP_TASKS_ENABLED", "1");
+  vi.stubEnv("CAPSULE_API_TOKEN", "audit-test-token");
+  vi.stubEnv("CAPSULE_MCP_READONLY", "0");
+  vi.stubEnv("CAPSULE_MCP_BATCH_CONCURRENCY", "1");
+  let releaseFirst!: () => void;
+  const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+  let requests = 0;
+  vi.mocked(capsuleFetch).mockImplementation(async () => {
+    requests++;
+    if (requests === 1) await first;
+    return new Response(JSON.stringify({ task: { id: requests, status: "COMPLETED" } }), {
+      headers: { "content-type": "application/json" },
+    }) as Awaited<ReturnType<typeof capsuleFetch>>;
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "audit", version: "1" }, {
+    capabilities: { tasks: { list: {}, cancel: {} } },
+  });
+  const server = createCapsuleMcpServer({ clientId: "audit-client" });
+  try {
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const created = await client.request({ method: "tools/call", params: {
+      name: "batch_complete_task", arguments: { ids: [1, 2, 3] }, task: { ttl: 1000 },
+    } }, z.any());
+    await new Promise(resolve => setTimeout(resolve, 1150));
+    await expect(client.request({ method: "tasks/get", params: {
+      taskId: created.task.taskId,
+    } }, z.any())).rejects.toThrow();
+    await expect(client.request({ method: "tasks/cancel", params: {
+      taskId: created.task.taskId,
+    } }, z.any())).rejects.toThrow();
+    releaseFirst();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(requests).toBe(1);
+  } finally {
+    releaseFirst();
+    await client.close();
+    await server.close();
+  }
+});
